@@ -1,7 +1,4 @@
-FROM public.ecr.aws/lambda/python:3.11
-
-RUN yum update -y \
-    && pip3 install --upgrade pip setuptools
+FROM public.ecr.aws/lambda/python:3.12
 
 # Copy function code
 COPY functions/replace-route/app.py ${LAMBDA_TASK_ROOT}
