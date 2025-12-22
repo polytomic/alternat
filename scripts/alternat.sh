@@ -21,6 +21,8 @@ load_config() {
    fi
    validate_var "eip_allocation_ids_csv" "$eip_allocation_ids_csv"
    validate_var "route_table_ids_csv" "$route_table_ids_csv"
+   validate_var "enable_ssm" "$enable_ssm"
+   validate_var "enable_cloudwatch_agent" "$enable_cloudwatch_agent"
 }
 
 validate_var() {
@@ -35,7 +37,7 @@ validate_var() {
 # configure_nat() sets up Linux to act as a NAT device.
 # See https://docs.aws.amazon.com/vpc/latest/userguide/VPC_NAT_Instance.html#NATInstance
 configure_nat() {
-   dnf -y install nftables conntrack-tools
+   $dnf_cmd install nftables
    systemctl enable --now nftables
 
    local nic_name="$(ip route show | grep default | sed -n 's/.*dev \([^\ ]*\).*/\1/p')"
@@ -162,12 +164,39 @@ configure_route_table() {
    done
 }
 
+# install_ssm_agent() installs the SSM agent if enable_ssm is true.
+install_ssm_agent() {
+   if [ "$enable_ssm" = "true" ]; then
+      echo "Installing SSM agent"
+      $dnf_cmd install amazon-ssm-agent && \
+      systemctl enable --now amazon-ssm-agent
+      if [ $? -ne 0 ]; then
+         panic "Unable to install SSM agent"
+      fi
+      echo "SSM agent installed successfully"
+   fi
+}
+
+# install_cloudwatch_agent() installs the CloudWatch Agent if enable_cloudwatch_agent is true.
+install_cloudwatch_agent() {
+   if [ "$enable_cloudwatch_agent" = "true" ]; then
+      echo "Installing CloudWatch agent"
+      $dnf_cmd install amazon-cloudwatch-agent && \
+      systemctl enable --now amazon-cloudwatch-agent
+      if [ $? -ne 0 ]; then
+         panic "Unable to install CloudWatch Agent"
+      fi
+      echo "CloudWatch Agent installed successfully"
+   fi
+}
+
 # alterNAT config file containing inputs needed for initialization
 CONFIG_FILE="/etc/alternat.conf"
 
 load_config
 
 curl_cmd="curl --silent --fail"
+dnf_cmd="dnf --quiet --assumeyes"
 
 echo "Requesting IMDSv2 token"
 token=$($curl_cmd -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 900")
@@ -190,8 +219,10 @@ INSTANCE_ID=$(CURL_WITH_TOKEN $II_URI | grep instanceId | awk -F\" '{print $4}')
 export AWS_DEFAULT_REGION=$(CURL_WITH_TOKEN $II_URI | grep region | awk -F\" '{print $4}')
 
 echo "Beginning self-managed NAT configuration"
+install_ssm_agent
 configure_nat
 disable_source_dest_check
 associate_eip
 configure_route_table
+install_cloudwatch_agent
 echo "Configuration completed successfully!"

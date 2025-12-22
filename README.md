@@ -34,11 +34,12 @@ Features:
 
 * Self-provisioned NAT instances in Auto Scaling Groups
 * Standby NAT Gateways with health checks and automated failover, facilitated by a Lambda function
-* Vanilla Amazon Linux 2023 AMI (no AMI management requirement)
+* Failback to the NAT instance upon recovery (optional)
+* Always uses the latest vanilla Amazon Linux 2023 AMI (no AMI management requirement)
 * Optional use of SSM for connecting to the NAT instances
+* Optional use of CloudWatch Agent to monitor the NAT instances
 * Max instance lifetimes (no long-lived instances!) with automated failover
 * A Terraform module to set everything up
-* Compatibility with the default naming convention used by the open source [terraform-aws-vpc Terraform module](https://github.com/terraform-aws-modules/terraform-aws-vpc/blob/master/variables.tf)
 
 Read on to learn more about alterNAT.
 
@@ -228,6 +229,26 @@ If you are using the open source terraform-aws-vpc module, you can set `nat_gate
 
 AlterNATively, you can remove the NAT Gateways and their EIPs from your existing configuration and then `terraform import` them to allow alterNAT to manage them.
 
+#### Providing explicit Elastic IPs for fallback NAT Gateways
+
+You can optionally supply your own Elastic IP allocation IDs for the fallback NAT Gateways instead of letting alterNAT create them automatically.
+
+This is useful if you already have pre-allocated EIPs (for example, allow-listed IPs) that must be reused by the fallback NAT Gateways.
+
+```hcl
+fallback_ngw_eip_allocation_ids = {
+  "eu-west-1a" = "eipalloc-0123456789abcdef0"
+  "eu-west-1b" = "eipalloc-1111222233334444"
+}
+```
+When an allocation ID is provided for an Availability Zone:
+- The module will not create a new aws_eip resource for that zone.
+- The corresponding NAT Gateway will use the specified allocation ID.
+- All other zones (without explicit IDs) will behave as before — alterNAT will create EIPs automatically or reuse protected ones.
+
+If you provide explicit EIPs for all zones, no new aws_eip.nat_gateway_eips resources will be created.
+
+
 ### Other Considerations
 
 - Read [the Amazon EC2 instance network bandwidth page](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-network-bandwidth.html) carefully. In particular:
@@ -242,7 +263,7 @@ AlterNATively, you can remove the NAT Gateways and their EIPs from your existing
 
 - [SSM Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html) is enabled by default. To view NAT connections on an instance, use sessions manager to connect, then run `sudo cat /proc/net/nf_conntrack`. Disable SSM by setting `enable_ssm=false`.
 
-- We intentionally use `most_recent=true` for the Amazon Linux 2 AMI. This helps to ensure that the latest AMI is used in the ASG launch template. If a new AMI is available when you run `terraform apply`, the launch template will be updated with the latest AMI. The new AMI will be launched automatically when the maximum instance lifetime is reached.
+- A new instance will be launched automatically when the maximum instance lifetime is reached using the latest AMI.
 
 - Most of the time, except when the instance is actively being replaced, NAT traffic should be routed through the NAT instance and NOT through the NAT Gateway. You can monitor the logs for the text "Failed connectivity tests! Replacing route" to be alerted to NAT instance failures.
 
@@ -267,6 +288,9 @@ AlterNATively, you can remove the NAT Gateways and their EIPs from your existing
 
 - If your EIPs are critical, for example if they have been allow listed by third parties, use `prevent_destroy_eips=true` to prevent accidental deletion.
 
+- Monitoring by the [CloudWatch Agent](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Install-CloudWatch-Agent.html) is disabled by default. Enable by setting `enable_cloudwatch_agent=true`. Note that you will incur custom metric charges:
+
+  > Metrics collected by the CloudWatch agent are billed as custom metrics. For more information about CloudWatch metrics pricing, see [Amazon CloudWatch Pricing](https://aws.amazon.com/cloudwatch/pricing/).
 
 ## Contributing
 
